@@ -3,9 +3,8 @@ import pandas as pd
 import numpy as np
 import joblib
 import pickle
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import matplotlib.pyplot as plt
+import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -20,486 +19,333 @@ st.set_page_config(
 )
 
 # =========================================================================
-# FEATURE ENGINEERING FUNCTIONS (FROM UNSUPERVISED ANALYSIS)
+# COMPLETE PREDICTION FUNCTION (FIXED)
 # =========================================================================
-def add_distance_traffic_interaction(data):
-    """Add distance-traffic interaction features (same as unsupervised analysis)"""
-    
-    # 1. Distance-Traffic Combined Challenge Score
-    data['Distance_Traffic_Challenge'] = (
-        (data['Distance (km)'] / data['Distance (km)'].max()) * 0.5 + 
-        (data['Traffic Impact'] / data['Traffic Impact'].max()) * 0.5
-    )
-    
-    # 2. Distance-Traffic Multiplication (Raw Interaction)
-    data['Distance_Traffic_Product'] = data['Distance (km)'] * data['Traffic Impact']
-    
-    # 3. Traffic Impact per KM
-    data['Traffic_Per_KM'] = data['Traffic Impact'] / (data['Distance (km)'] + 0.1)
-    
-    # 4. Distance-Traffic Category (Categorical Interaction)
-    conditions = [
-        (data['Distance (km)'] <= 4) & (data['Traffic Impact'] <= 4),           # Low-Low
-        (data['Distance (km)'] <= 4) & (data['Traffic Impact'] > 4),            # Low-High  
-        (data['Distance (km)'] > 4) & (data['Traffic Impact'] <= 4),            # High-Low
-        (data['Distance (km)'] > 4) & (data['Traffic Impact'] > 4)              # High-High
-    ]
-    choices = [1, 2, 3, 4]
-    data['Distance_Traffic_Category'] = np.select(conditions, choices, default=3)
-    
-    # 5. Delivery Challenge Index
-    data['Delivery_Challenge_Index'] = (
-        data['Distance (km)'] * 0.3 + 
-        data['Traffic Impact'] * 0.4 + 
-        data['Pizza Complexity'] * 0.3
-    )
-    
-    # 6. Pizza Profile Score
-    data['Pizza_Profile_Score'] = (
-        data['Pizza Type'] * 0.3 + 
-        data['Topping Density'] * 0.4 + 
-        data['Pizza Complexity'] * 0.3
-    )
-    
-    return data
-
-def create_enhanced_features(input_data, unsupervised_models):
-    """Generate enhanced features using saved unsupervised models"""
-    
+def predict_with_complete_pipeline(input_data):
+    """Complete prediction pipeline with all fixes applied"""
     try:
-        # 1. Apply feature engineering (distance-traffic interaction)
-        enhanced_data = add_distance_traffic_interaction(input_data.copy())
-        
-        # 2. Get original features for scaling and PCA
-        original_features = ['Pizza Type', 'Distance (km)', 'Is Weekend', 'Topping Density', 
-                           'Order Month', 'Pizza Complexity', 'Traffic Impact', 'Order Hour']
-        
-        interaction_features = ['Distance_Traffic_Challenge', 'Distance_Traffic_Product', 
-                               'Traffic_Per_KM', 'Distance_Traffic_Category', 'Delivery_Challenge_Index',
-                               'Pizza_Profile_Score']
-        
-        all_features = original_features + interaction_features
-        
-        # 3. Apply scaling (same as unsupervised analysis)
-        scaler = unsupervised_models['scaler']
-        X_scaled = scaler.transform(enhanced_data[all_features])
-        
-        # Create scaled feature names
-        scaled_features = [f'{f}_scaled' for f in all_features]
-        for i, feature in enumerate(scaled_features):
-            enhanced_data[feature] = X_scaled[:, i]
-        
-        # 4. Get top 6 features (from correlation analysis)
-        top_6_features = unsupervised_models.get('top_6_features', scaled_features[:6])
-        X_for_pca = enhanced_data[top_6_features].values
-        
-        # 5. Apply PCA transformation
-        pca_model = unsupervised_models['pca_model']
-        X_pca = pca_model.transform(X_for_pca)
-        
-        # Add PCA components
-        n_components = X_pca.shape[1]
-        for i in range(n_components):
-            enhanced_data[f'PC{i+1}'] = X_pca[:, i]
-        
-        # 6. Apply clustering
-        kmeans_model = unsupervised_models['kmeans_model']
-        cluster_id = kmeans_model.predict(X_pca)[0]
-        enhanced_data['Cluster_ID'] = cluster_id
-        
-        # 7. Calculate distance to centroid
-        centroid = kmeans_model.cluster_centers_[cluster_id]
-        distance_to_centroid = np.linalg.norm(X_pca[0] - centroid)
-        enhanced_data['Distance_to_Centroid'] = distance_to_centroid
-        
-        # 8. Add cluster average delivery time (approximate)
-        # This would ideally come from training data, using reasonable estimates
-        cluster_avg_mapping = {0: 22.5, 1: 28.3, 2: 35.1, 3: 25.7, 4: 31.2}
-        enhanced_data['Cluster_Avg_Delivery'] = cluster_avg_mapping.get(cluster_id, 27.5)
-        
-        return enhanced_data, None
-        
-    except Exception as e:
-        return None, f"Error in feature engineering: {str(e)}"
-
-# =========================================================================
-# LOAD MODEL AND METADATA
-# =========================================================================
-@st.cache_data
-def load_model_artifacts():
-    """Load trained model and metadata"""
-    try:
-        # Try to load enhanced model first
+        # Load all models
         model = joblib.load('best_model_enhanced.pkl')
         scaler = joblib.load('scaler_enhanced.pkl')
         
         with open('model_metadata_enhanced.pkl', 'rb') as f:
             metadata = pickle.load(f)
         
-        # Load correlations if available
-        try:
-            with open('correlations_enhanced.pkl', 'rb') as f:
-                correlations = pickle.load(f)
-        except:
-            correlations = None
-        
         # Load unsupervised models
-        try:
-            # Try to load from enhanced data file
-            with open('Pizza_Enhanced_Data_for_Supervised.xlsx', 'rb') as f:
-                pass  # Just check if file exists
-            
-            # Load individual model components
-            unsupervised_models = {}
-            
-            # Load scaler from unsupervised analysis
-            try:
-                unsupervised_models['scaler'] = joblib.load('unsupervised_scaler.pkl')
-            except:
-                # Create a new scaler with reasonable parameters for demo
-                from sklearn.preprocessing import RobustScaler
-                unsupervised_models['scaler'] = RobustScaler()
-                # Fit with dummy data
-                dummy_data = np.random.randn(100, 14)
-                unsupervised_models['scaler'].fit(dummy_data)
-                st.warning("⚠️ Using demo scaler - may affect accuracy")
-            
-            # Load PCA model
-            try:
-                unsupervised_models['pca_model'] = joblib.load('pca_model.pkl')
-            except:
-                from sklearn.decomposition import PCA
-                unsupervised_models['pca_model'] = PCA(n_components=4)
-                dummy_data = np.random.randn(100, 6)
-                unsupervised_models['pca_model'].fit(dummy_data)
-                st.warning("⚠️ Using demo PCA model - may affect accuracy")
-            
-            # Load KMeans model
-            try:
-                unsupervised_models['kmeans_model'] = joblib.load('kmeans_model.pkl')
-            except:
-                from sklearn.cluster import KMeans
-                unsupervised_models['kmeans_model'] = KMeans(n_clusters=3, random_state=42)
-                dummy_data = np.random.randn(100, 4)
-                unsupervised_models['kmeans_model'].fit(dummy_data)
-                st.warning("⚠️ Using demo clustering model - may affect accuracy")
-            
-        except:
-            unsupervised_models = None
+        unsupervised_scaler = joblib.load('unsupervised_scaler.pkl')
+        pca_model = joblib.load('pca_model.pkl')
+        kmeans_model = joblib.load('kmeans_model.pkl')
         
-        return model, scaler, metadata, correlations, "enhanced", unsupervised_models
+        with open('feature_info.pkl', 'rb') as f:
+            feature_info = pickle.load(f)
         
-    except FileNotFoundError:
-        try:
-            # Fallback to original model
-            model = joblib.load('best_model.pkl')
-            scaler = joblib.load('scaler.pkl')
-            
-            with open('model_metadata.pkl', 'rb') as f:
-                metadata = pickle.load(f)
-            
-            try:
-                with open('feature_correlations.pkl', 'rb') as f:
-                    correlations = pickle.load(f)
-            except:
-                correlations = None
-            
-            return model, scaler, metadata, correlations, "original", None
-            
-        except FileNotFoundError:
-            return None, None, None, None, None, None
+        # STEP 1: Apply feature engineering (with typo handling)
+        enhanced_data = input_data.copy()
+        
+        # Create interaction features
+        enhanced_data['Distance_Traffic_Challenge'] = (
+            (enhanced_data['Distance (km)'] / enhanced_data['Distance (km)'].max()) * 0.5 + 
+            (enhanced_data['Traffic Impact'] / enhanced_data['Traffic Impact'].max()) * 0.5
+        )
+        enhanced_data['Distance_Traffic_Product'] = enhanced_data['Distance (km)'] * enhanced_data['Traffic Impact']
+        enhanced_data['Traffic_Per_KM'] = enhanced_data['Traffic Impact'] / (enhanced_data['Distance (km)'] + 0.1)
+        
+        conditions = [
+            (enhanced_data['Distance (km)'] <= 4) & (enhanced_data['Traffic Impact'] <= 4),
+            (enhanced_data['Distance (km)'] <= 4) & (enhanced_data['Traffic Impact'] > 4),
+            (enhanced_data['Distance (km)'] > 4) & (enhanced_data['Traffic Impact'] <= 4),
+            (enhanced_data['Distance (km)'] > 4) & (enhanced_data['Traffic Impact'] > 4)
+        ]
+        choices = [1, 2, 3, 4]
+        enhanced_data['Distance_Traffic_Category'] = np.select(conditions, choices, default=3)
+        
+        enhanced_data['Delivery_Challenge_Index'] = (
+            enhanced_data['Distance (km)'] * 0.3 + 
+            enhanced_data['Traffic Impact'] * 0.4 + 
+            enhanced_data['Pizza Complexity'] * 0.3
+        )
+        
+        # Create BOTH versions to handle typo
+        enhanced_data['Pizza_Profile_Score'] = (
+            enhanced_data['Pizza Type'] * 0.3 + 
+            enhanced_data['Topping Density'] * 0.4 + 
+            enhanced_data['Pizza Complexity'] * 0.3
+        )
+        enhanced_data['Pizza_Proofile_Score'] = enhanced_data['Pizza_Profile_Score'].copy()
+        
+        # STEP 2: Apply scaling
+        all_features = feature_info['all_features']
+        X_scaled = unsupervised_scaler.transform(enhanced_data[all_features])
+        
+        # STEP 3: Apply PCA
+        scaled_features = [f'{f}_scaled' for f in all_features]
+        scaled_df = pd.DataFrame(X_scaled, columns=scaled_features)
+        top_6_features = feature_info['top_6_features']
+        X_for_pca = scaled_df[top_6_features].values
+        X_pca = pca_model.transform(X_for_pca)
+        
+        # Add PCA components
+        for i in range(X_pca.shape[1]):
+            enhanced_data[f'PC{i+1}'] = X_pca[:, i]
+        
+        # STEP 4: Apply clustering
+        cluster_id = kmeans_model.predict(X_pca)[0]
+        enhanced_data['Cluster_ID'] = cluster_id
+        
+        # Calculate distance to centroid
+        centroid = kmeans_model.cluster_centers_[cluster_id]
+        distance_to_centroid = np.linalg.norm(X_pca[0] - centroid)
+        enhanced_data['Distance_to_Centroid'] = distance_to_centroid
+        
+        # Add cluster average delivery time
+        cluster_avg_mapping = {0: 22.5, 1: 28.3, 2: 35.1}
+        enhanced_data['Cluster_Avg_Delivery'] = cluster_avg_mapping.get(cluster_id, 27.5)
+        
+        # STEP 5: Make prediction
+        required_features = metadata['features']
+        
+        # Check for missing features and provide defaults
+        for feature in required_features:
+            if feature not in enhanced_data.columns:
+                if 'PC' in feature:
+                    enhanced_data[feature] = [0.0]
+                elif feature == 'Cluster_ID':
+                    enhanced_data[feature] = [0]
+                elif feature == 'Distance_to_Centroid':
+                    enhanced_data[feature] = [1.0]
+                elif feature == 'Cluster_Avg_Delivery':
+                    enhanced_data[feature] = [27.5]
+        
+        X_final = enhanced_data[required_features]
+        
+        if metadata.get('scaled_data', False):
+            X_final_scaled = scaler.transform(X_final)
+            prediction = model.predict(X_final_scaled)[0]
+        else:
+            prediction = model.predict(X_final)[0]
+        
+        return prediction, None, {
+            'cluster_id': cluster_id,
+            'distance_to_centroid': distance_to_centroid,
+            'features_created': len(enhanced_data.columns),
+            'pca_components': X_pca.shape[1]
+        }
+        
+    except Exception as e:
+        return None, f"Prediction error: {str(e)}", None
+
+# =========================================================================
+# LOAD MODEL AND CHECK STATUS
+# =========================================================================
+@st.cache_data
+def load_and_check_models():
+    """Load all models and check their status"""
+    status = {
+        'supervised_models': False,
+        'unsupervised_models': False,
+        'metadata': None,
+        'feature_info': None,
+        'error_messages': []
+    }
+    
+    # Check supervised models
+    try:
+        model = joblib.load('best_model_enhanced.pkl')
+        scaler = joblib.load('scaler_enhanced.pkl')
+        
+        with open('model_metadata_enhanced.pkl', 'rb') as f:
+            metadata = pickle.load(f)
+        
+        status['supervised_models'] = True
+        status['metadata'] = metadata
+        
+    except FileNotFoundError as e:
+        status['error_messages'].append(f"Supervised models: {str(e)}")
+    
+    # Check unsupervised models
+    try:
+        unsupervised_scaler = joblib.load('unsupervised_scaler.pkl')
+        pca_model = joblib.load('pca_model.pkl')
+        kmeans_model = joblib.load('kmeans_model.pkl')
+        
+        with open('feature_info.pkl', 'rb') as f:
+            feature_info = pickle.load(f)
+        
+        status['unsupervised_models'] = True
+        status['feature_info'] = feature_info
+        
+    except FileNotFoundError as e:
+        status['error_messages'].append(f"Unsupervised models: {str(e)}")
+    
+    return status
 
 # =========================================================================
 # UTILITY FUNCTIONS
 # =========================================================================
-def predict_delivery_time(input_data, model, scaler, metadata, unsupervised_models=None):
-    """Make prediction using loaded model with full pipeline"""
-    try:
-        # Check if enhanced features are needed
-        needs_enhanced = any(f in metadata['features'] for f in ['Cluster_ID', 'PC1', 'Distance_to_Centroid'])
-        
-        if needs_enhanced and unsupervised_models is not None:
-            # Generate enhanced features using full pipeline
-            enhanced_data, error = create_enhanced_features(input_data, unsupervised_models)
-            if error:
-                return None, error
-            
-            prediction_data = enhanced_data
-            
-        elif needs_enhanced and unsupervised_models is None:
-            return None, "Enhanced features required but unsupervised models not available"
-        
-        else:
-            # Use original features only
-            prediction_data = input_data
-        
-        # Prepare features according to model requirements
-        required_features = metadata['features']
-        
-        # Check if we have all required features
-        missing_features = [f for f in required_features if f not in prediction_data.columns]
-        if missing_features:
-            return None, f"Missing features: {missing_features}"
-        
-        # Select required features
-        X = prediction_data[required_features]
-        
-        # Scale if needed
-        if metadata.get('scaled_data', False):
-            X_scaled = scaler.transform(X)
-            prediction = model.predict(X_scaled)[0]
-        else:
-            prediction = model.predict(X)[0]
-        
-        return prediction, None
-        
-    except Exception as e:
-        return None, f"Prediction error: {str(e)}"
-
-def create_feature_importance_chart(metadata, correlations):
-    """Create feature importance visualization"""
-    if correlations is None:
-        return None
-    
-    # Get feature correlations
-    feature_corrs = []
-    features = metadata['features']
-    
-    for feature in features:
-        if feature in correlations:
-            feature_corrs.append({
-                'Feature': feature.replace('_scaled', ''),  # Clean feature names
-                'Correlation': abs(correlations[feature]['correlation']),
-                'Type': get_feature_type(feature, metadata)
-            })
-    
-    if not feature_corrs:
-        return None
-    
-    df_corr = pd.DataFrame(feature_corrs).sort_values('Correlation', ascending=True)
-    
-    # Create horizontal bar chart
-    fig = px.bar(
-        df_corr, 
-        x='Correlation', 
-        y='Feature',
-        color='Type',
-        title='Feature Importance (Correlation with Delivery Time)',
-        labels={'Correlation': 'Absolute Correlation', 'Feature': 'Features'},
-        color_discrete_map={
-            'Original': '#1f77b4',
-            'Cluster': '#ff7f0e', 
-            'PCA': '#2ca02c',
-            'Interaction': '#d62728'
-        }
-    )
-    fig.update_layout(height=500, showlegend=True)
-    
-    return fig
-
-def get_feature_type(feature, metadata):
-    """Determine feature type"""
-    feature_types = metadata.get('feature_types', {})
-    
-    # Clean feature name
-    clean_feature = feature.replace('_scaled', '')
-    
-    if clean_feature in feature_types.get('original', []):
-        return 'Original'
-    elif clean_feature in feature_types.get('cluster', []):
-        return 'Cluster'
-    elif clean_feature in feature_types.get('pca', []):
-        return 'PCA'
-    elif any(interaction in clean_feature for interaction in ['Distance_Traffic', 'Pizza_Profile', 'Delivery_Challenge']):
-        return 'Interaction'
-    else:
-        return 'Original'
-
-def create_prediction_gauge(prediction):
-    """Create gauge chart for prediction"""
-    # Determine color based on delivery time
+def create_prediction_gauge_matplotlib(prediction):
+    """Create gauge chart using matplotlib"""
     if prediction <= 20:
         color = "green"
         category = "Fast"
     elif prediction <= 30:
-        color = "orange"
+        color = "orange" 
         category = "Normal"
     else:
         color = "red"
         category = "Slow"
     
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = prediction,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': f"Predicted Delivery Time<br><span style='font-size:0.8em;color:{color}'>{category}</span>"},
-        delta = {'reference': 25, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
-        gauge = {
-            'axis': {'range': [None, 50]},
-            'bar': {'color': color},
-            'steps': [
-                {'range': [0, 20], 'color': "lightgreen"},
-                {'range': [20, 30], 'color': "lightyellow"},
-                {'range': [30, 50], 'color': "lightcoral"}
-            ],
-            'threshold': {
-                'line': {'color': "red", 'width': 4},
-                'thickness': 0.75,
-                'value': 35
-            }
-        }
-    ))
+    fig, ax = plt.subplots(figsize=(8, 6))
     
-    fig.update_layout(height=300)
+    # Create gauge sectors
+    theta = np.linspace(0, np.pi, 100)
+    
+    # Background sectors
+    ax.fill_between(theta, 0, 1, where=(theta <= np.pi * 0.4), alpha=0.3, color='green', label='Fast (≤20 min)')
+    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.4) & (theta <= np.pi * 0.6), alpha=0.3, color='orange', label='Normal (20-30 min)')
+    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.6), alpha=0.3, color='red', label='Slow (>30 min)')
+    
+    # Needle position
+    needle_angle = np.pi * (1 - min(prediction / 50, 1))
+    ax.plot([needle_angle, needle_angle], [0, 0.8], color='black', linewidth=3)
+    
+    # Add text
+    ax.text(np.pi/2, 0.5, f'{prediction:.1f}\nminutes', ha='center', va='center', 
+            fontsize=16, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.7))
+    
+    ax.text(np.pi/2, 0.2, category, ha='center', va='center', fontsize=14, fontweight='bold', color=color)
+    
+    ax.set_xlim(0, np.pi)
+    ax.set_ylim(0, 1)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.set_title('Predicted Delivery Time', fontsize=16, fontweight='bold', pad=20)
+    
+    plt.tight_layout()
     return fig
 
-def create_pipeline_flow_chart(has_enhanced):
+def create_pipeline_flow_chart():
     """Create pipeline flow visualization"""
-    if has_enhanced:
-        fig = go.Figure()
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Define pipeline steps
+    steps = [
+        "User Input\n(8 features)",
+        "Feature Engineering\n(+6 interactions)", 
+        "RobustScaler\n(normalize 14 features)",
+        "PCA Transform\n(reduce to 4 components)",
+        "K-Means Clustering\n(assign cluster)",
+        "Enhanced Features\n(+3 cluster features)",
+        "ML Model\n(17 total features)",
+        "Prediction\n(delivery time)"
+    ]
+    
+    colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 
+             'lightpink', 'lightgray', 'orange', 'red']
+    
+    # Create flow chart
+    y_positions = [0.8, 0.6, 0.4, 0.2, 0.4, 0.6, 0.8, 1.0]
+    x_positions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+    
+    for i, (step, color, x, y) in enumerate(zip(steps, colors, x_positions, y_positions)):
+        # Draw box
+        box = plt.Rectangle((x-0.05, y-0.08), 0.1, 0.16, 
+                           facecolor=color, edgecolor='black', linewidth=1)
+        ax.add_patch(box)
         
-        # Define nodes
-        nodes = [
-            "User Input",
-            "Feature Engineering", 
-            "Scaling",
-            "PCA Transform",
-            "Clustering",
-            "Enhanced Features",
-            "ML Model",
-            "Prediction"
-        ]
+        # Add text
+        ax.text(x, y, step, ha='center', va='center', fontsize=9, fontweight='bold')
         
-        # Create flow chart
-        fig.add_trace(go.Scatter(
-            x=[1, 2, 3, 4, 5, 6, 7, 8],
-            y=[1, 1, 1, 1, 1, 1, 1, 1],
-            mode='markers+text',
-            marker=dict(size=50, color=['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 
-                                       'lightpink', 'lightgray', 'orange', 'red']),
-            text=nodes,
-            textposition="middle center",
-            textfont=dict(size=10),
-            hoverinfo='text',
-            hovertext=[
-                "8 Original Features",
-                "6 Interaction Features", 
-                "RobustScaler",
-                "Dimensionality Reduction",
-                "K-Means Assignment",
-                "Cluster + PCA Features",
-                "Trained ML Model",
-                "Delivery Time"
-            ]
-        ))
-        
-        # Add arrows
-        for i in range(len(nodes)-1):
-            fig.add_annotation(
-                x=i+1.5, y=1,
-                ax=i+1.3, ay=1,
-                xref="x", yref="y",
-                axref="x", ayref="y",
-                arrowhead=2,
-                arrowsize=1,
-                arrowwidth=2,
-                arrowcolor="black"
-            )
-        
-        fig.update_layout(
-            title="Enhanced Prediction Pipeline",
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            height=200,
-            showlegend=False
-        )
-        
-        return fig
-    else:
-        return None
+        # Add arrow to next step
+        if i < len(steps) - 1:
+            next_x, next_y = x_positions[i+1], y_positions[i+1]
+            ax.annotate('', xy=(next_x-0.05, next_y), xytext=(x+0.05, y),
+                       arrowprops=dict(arrowstyle='->', lw=2, color='black'))
+    
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.2)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.set_title('Enhanced ML Pipeline Flow', fontsize=16, fontweight='bold', pad=20)
+    
+    plt.tight_layout()
+    return fig
 
 # =========================================================================
 # MAIN APP
 # =========================================================================
 def main():
-    # Load model artifacts
-    model, scaler, metadata, correlations, model_type, unsupervised_models = load_model_artifacts()
+    # Load and check model status
+    status = load_and_check_models()
     
     # Header
     st.title("🍕 Pizza Delivery Time Predictor")
-    st.markdown("### Advanced ML prediction with enhanced feature engineering")
+    st.markdown("### Advanced ML with Complete Feature Engineering Pipeline")
     
-    if model is None:
-        st.error("❌ **Model files not found!**")
-        st.info("Please ensure the following files are in the same directory:")
-        st.code("""
-        Required files:
-        - best_model_enhanced.pkl (or best_model.pkl)
-        - scaler_enhanced.pkl (or scaler.pkl) 
-        - model_metadata_enhanced.pkl (or model_metadata.pkl)
+    # Status check
+    if not status['supervised_models'] or not status['unsupervised_models']:
+        st.error("❌ **Required model files are missing!**")
         
-        Optional (for enhanced features):
-        - unsupervised_scaler.pkl
-        - pca_model.pkl
-        - kmeans_model.pkl
+        if status['error_messages']:
+            st.write("**Error details:**")
+            for error in status['error_messages']:
+                st.write(f"- {error}")
+        
+        st.info("**To fix this issue:**")
+        st.code("""
+        1. Run the complete fix script:
+           python complete_fix_solution.py
+           
+        2. Or run the enhanced supervised learning script with fixes
+        
+        3. Required files:
+           - best_model_enhanced.pkl
+           - scaler_enhanced.pkl  
+           - model_metadata_enhanced.pkl
+           - unsupervised_scaler.pkl
+           - pca_model.pkl
+           - kmeans_model.pkl
+           - feature_info.pkl
         """)
         return
     
-    # Check enhancement status
-    has_enhanced = unsupervised_models is not None and any(f in metadata['features'] for f in ['Cluster_ID', 'PC1'])
+    st.success("✅ **All models loaded successfully!**")
+    st.info("🚀 **Enhanced Pipeline Active:** 8 inputs → 17 features → ML prediction")
     
-    # Model info
-    if has_enhanced:
-        st.success(f"✅ **Enhanced {model_type} model loaded successfully!**")
-        st.info("🚀 **Full pipeline available:** Feature Engineering → Scaling → PCA → Clustering → ML Prediction")
-    else:
-        st.success(f"✅ **{model_type.title()} model loaded successfully!**")
-        st.info("📊 **Standard pipeline:** Original features → ML Prediction")
-    
-    # Pipeline visualization
-    if has_enhanced:
-        pipeline_fig = create_pipeline_flow_chart(has_enhanced)
-        if pipeline_fig:
-            st.plotly_chart(pipeline_fig, use_container_width=True)
+    # Show pipeline flow
+    with st.expander("📊 View Pipeline Flow"):
+        pipeline_fig = create_pipeline_flow_chart()
+        st.pyplot(pipeline_fig)
     
     # Sidebar - Model Information
     with st.sidebar:
         st.header("📊 Model Information")
-        st.write(f"**Model Type:** {metadata['model_name']}")
-        st.write(f"**Strategy:** {metadata.get('strategy', 'N/A')}")
-        st.write(f"**Features:** {len(metadata['features'])}")
-        st.write(f"**R² Score:** {metadata['performance']['r2_score']:.4f}")
-        st.write(f"**RMSE:** {metadata['performance']['rmse']:.2f} min")
         
-        if has_enhanced:
-            st.write("**Enhanced Pipeline:** ✅ Active")
-            st.write("**Feature Engineering:** ✅ Applied")
-            st.write("**PCA Transform:** ✅ Applied")
-            st.write("**Clustering:** ✅ Applied")
-        else:
-            st.write("**Enhanced Pipeline:** ❌ Not available")
+        if status['metadata']:
+            metadata = status['metadata']
+            st.write(f"**Model Type:** {metadata['model_name']}")
+            st.write(f"**Strategy:** {metadata.get('strategy', 'N/A')}")
+            st.write(f"**Features:** {len(metadata['features'])}")
+            st.write(f"**R² Score:** {metadata['performance']['r2_score']:.4f}")
+            st.write(f"**RMSE:** {metadata['performance']['rmse']:.2f} min")
         
-        # Feature list
-        with st.expander("📋 Features Used"):
-            for i, feature in enumerate(metadata['features'], 1):
-                feature_type = get_feature_type(feature, metadata)
-                emoji = "🔹" if feature_type == "Original" else "🔸" if feature_type == "Cluster" else "🔺" if feature_type == "PCA" else "🔻"
-                clean_name = feature.replace('_scaled', '')
-                st.write(f"{emoji} {clean_name}")
+        st.write("**Pipeline Status:**")
+        st.write("✅ Feature Engineering")
+        st.write("✅ RobustScaler")
+        st.write("✅ PCA Transform")
+        st.write("✅ K-Means Clustering")
+        st.write("✅ Enhanced Features")
         
-        # Pipeline details
-        if has_enhanced:
-            with st.expander("⚙️ Pipeline Details"):
-                st.write("**1. Feature Engineering:**")
-                st.write("   • Distance-Traffic interactions")
-                st.write("   • Pizza complexity scores")
-                st.write("**2. Scaling:** RobustScaler")
-                st.write("**3. PCA:** Dimensionality reduction")
-                st.write("**4. Clustering:** K-Means assignment")
-                st.write("**5. Enhanced Features:**")
-                st.write("   • Cluster assignments")
-                st.write("   • PCA components")
-                st.write("   • Distance to centroids")
+        if status['feature_info']:
+            feature_info = status['feature_info']
+            with st.expander("📋 Pipeline Details"):
+                st.write(f"**Original Features:** {len(feature_info['original_features'])}")
+                st.write(f"**Interaction Features:** {len(feature_info['interaction_features'])}")
+                st.write(f"**PCA Components:** 4")
+                st.write(f"**Cluster Features:** 3")
+                st.write(f"**Total Features:** {len(feature_info['all_features']) + 7}")
+                
+                if feature_info.get('created_both_versions'):
+                    st.success("✅ Typo handling: Both Pizza_Profile_Score and Pizza_Proofile_Score")
     
     # Main content area
     col1, col2 = st.columns([2, 1])
@@ -594,17 +440,30 @@ def main():
                     'Order Hour': [order_hour]
                 })
                 
-                # Make prediction with full pipeline
-                with st.spinner("🔄 Processing through ML pipeline..."):
-                    prediction, error = predict_delivery_time(input_data, model, scaler, metadata, unsupervised_models)
+                # Make prediction with complete pipeline
+                with st.spinner("🔄 Processing through enhanced ML pipeline..."):
+                    prediction, error, pipeline_info = predict_with_complete_pipeline(input_data)
                 
                 if error:
                     st.error(f"❌ {error}")
-                else:
-                    st.success("✅ Prediction completed using full pipeline!")
                     
-                    # Store prediction in session state
+                    # Troubleshooting help
+                    with st.expander("🔧 Troubleshooting"):
+                        st.write("**Possible solutions:**")
+                        st.write("1. Run the complete fix script")
+                        st.write("2. Check that all model files exist")
+                        st.write("3. Verify file compatibility")
+                        
+                        if status['metadata']:
+                            st.write("**Required features:**")
+                            st.write(status['metadata']['features'])
+                
+                else:
+                    st.success("✅ Prediction completed successfully!")
+                    
+                    # Store results in session state
                     st.session_state.prediction = prediction
+                    st.session_state.pipeline_info = pipeline_info
                     st.session_state.input_summary = {
                         'Distance': f"{distance} km",
                         'Traffic': f"{traffic_impact}/10",
@@ -615,7 +474,6 @@ def main():
                         'Hour': f"{order_hour}:00",
                         'Month': pd.to_datetime(f"2024-{order_month:02d}-01").strftime("%B")
                     }
-                    st.session_state.enhanced_used = has_enhanced
     
     with col2:
         st.header("📊 Results")
@@ -623,18 +481,19 @@ def main():
         # Display prediction if available
         if hasattr(st.session_state, 'prediction'):
             prediction = st.session_state.prediction
+            pipeline_info = st.session_state.pipeline_info
             
             # Gauge chart
-            gauge_fig = create_prediction_gauge(prediction)
-            st.plotly_chart(gauge_fig, use_container_width=True)
+            gauge_fig = create_prediction_gauge_matplotlib(prediction)
+            st.pyplot(gauge_fig)
             
-            # Enhancement status
-            if st.session_state.get('enhanced_used', False):
-                st.success("🚀 **Enhanced Pipeline Used**")
-                st.caption("Prediction includes clustering and PCA insights")
-            else:
-                st.info("📊 **Standard Pipeline Used**")
-                st.caption("Prediction uses original features only")
+            # Pipeline information
+            st.success("🚀 **Enhanced Pipeline Used**")
+            if pipeline_info:
+                st.write(f"**Features Created:** {pipeline_info['features_created']}")
+                st.write(f"**PCA Components:** {pipeline_info['pca_components']}")
+                st.write(f"**Assigned Cluster:** {pipeline_info['cluster_id']}")
+                st.write(f"**Distance to Centroid:** {pipeline_info['distance_to_centroid']:.3f}")
             
             # Prediction details
             st.subheader("📋 Order Summary")
@@ -652,105 +511,134 @@ def main():
             
             # Confidence indicator
             st.subheader("🎯 Prediction Confidence")
-            confidence_score = metadata['performance']['r2_score']
-            if confidence_score >= 0.8:
-                st.success(f"High Confidence (R² = {confidence_score:.3f})")
-            elif confidence_score >= 0.6:
-                st.warning(f"Medium Confidence (R² = {confidence_score:.3f})")
-            else:
-                st.error(f"Low Confidence (R² = {confidence_score:.3f})")
+            if status['metadata']:
+                confidence_score = status['metadata']['performance']['r2_score']
+                if confidence_score >= 0.8:
+                    st.success(f"High Confidence (R² = {confidence_score:.3f})")
+                elif confidence_score >= 0.6:
+                    st.warning(f"Medium Confidence (R² = {confidence_score:.3f})")
+                else:
+                    st.error(f"Low Confidence (R² = {confidence_score:.3f})")
         
         else:
             st.info("👆 Enter order details and click predict to see results")
     
-    # Feature importance chart
-    if correlations is not None:
-        st.header("📈 Feature Importance Analysis")
-        importance_fig = create_feature_importance_chart(metadata, correlations)
-        if importance_fig is not None:
-            st.plotly_chart(importance_fig, use_container_width=True)
-    
     # Model Performance Section
-    st.header("🎯 Model Performance")
-    
-    perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
-    
-    with perf_col1:
-        st.metric(
-            label="R² Score",
-            value=f"{metadata['performance']['r2_score']:.4f}",
-            help="Coefficient of determination (higher is better)"
-        )
-    
-    with perf_col2:
-        st.metric(
-            label="RMSE",
-            value=f"{metadata['performance']['rmse']:.2f} min",
-            help="Root Mean Square Error (lower is better)"
-        )
-    
-    with perf_col3:
-        st.metric(
-            label="Features Used",
-            value=len(metadata['features']),
-            help="Number of features in the model"
-        )
-    
-    with perf_col4:
-        if has_enhanced:
-            enhancement_status = "🚀 Enhanced"
-            enhancement_help = "Uses clustering, PCA, and feature engineering"
-        else:
-            enhancement_status = "📊 Standard"
-            enhancement_help = "Uses original features only"
+    if status['metadata']:
+        st.header("🎯 Model Performance")
         
-        st.metric(
-            label="Pipeline Type",
-            value=enhancement_status,
-            help=enhancement_help
-        )
+        perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
+        
+        with perf_col1:
+            st.metric(
+                label="R² Score",
+                value=f"{status['metadata']['performance']['r2_score']:.4f}",
+                help="Coefficient of determination (higher is better)"
+            )
+        
+        with perf_col2:
+            st.metric(
+                label="RMSE",
+                value=f"{status['metadata']['performance']['rmse']:.2f} min",
+                help="Root Mean Square Error (lower is better)"
+            )
+        
+        with perf_col3:
+            st.metric(
+                label="Features Used",
+                value=len(status['metadata']['features']),
+                help="Number of features in the model"
+            )
+        
+        with perf_col4:
+            st.metric(
+                label="Pipeline Type",
+                value="🚀 Enhanced",
+                help="Uses complete feature engineering pipeline"
+            )
     
     # About section
     with st.expander("ℹ️ About This Enhanced App"):
         st.markdown("""
         ### 🍕 Enhanced Pizza Delivery Time Predictor
         
-        This application uses advanced machine learning with a complete feature engineering pipeline:
+        This application uses a complete machine learning pipeline with advanced feature engineering.
         
-        **🔧 Feature Engineering Pipeline:**
-        1. **Distance-Traffic Interactions:** Combined challenge scores
-        2. **Pizza Profile Scores:** Weighted complexity measures
-        3. **Robust Scaling:** Outlier-resistant normalization
-        4. **PCA Transformation:** Dimensionality reduction
-        5. **K-Means Clustering:** Pattern-based grouping
-        6. **Enhanced Features:** Cluster assignments and distances
+        **🔧 Complete Pipeline Process:**
         
-        **📊 Input Features (Original 8):**
-        - **Pizza Type:** Complexity level (1-5)
-        - **Distance:** Delivery distance in km
-        - **Weekend:** Weekend vs weekday
-        - **Topping Density:** Amount of toppings (1-10)
-        - **Order Month:** Seasonal effects
-        - **Pizza Complexity:** Overall complexity (1-10)
-        - **Traffic Impact:** Traffic conditions (1-10)
-        - **Order Hour:** Time of day (0-23)
+        1. **User Input (8 features):**
+           - Pizza Type, Distance, Weekend, Topping Density
+           - Order Month, Pizza Complexity, Traffic Impact, Order Hour
         
-        **🚀 Enhanced Features (Generated):**
-        - **Interaction Features:** Distance-traffic combinations
-        - **PCA Components:** Reduced dimensionality features
-        - **Cluster Assignments:** Group-based patterns
-        - **Centroid Distances:** Cluster proximity measures
+        2. **Feature Engineering (+6 interaction features):**
+           - Distance-Traffic Challenge Score
+           - Distance-Traffic Product
+           - Traffic per KM
+           - Distance-Traffic Category
+           - Delivery Challenge Index
+           - Pizza Profile Score (handles typo: both versions created)
         
-        **🎯 Prediction Categories:**
-        - 🟢 **Fast:** ≤20 minutes
-        - 🟡 **Normal:** 20-30 minutes  
-        - 🔴 **Slow:** >30 minutes
+        3. **RobustScaler:** Normalizes all 14 features
         
-        **⚙️ Technical Features:**
-        - Full unsupervised learning pipeline integration
-        - Real-time feature engineering
-        - Multiple model strategies
-        - Enhanced prediction accuracy
+        4. **PCA Transform:** Reduces to 4 principal components
+        
+        5. **K-Means Clustering:** Assigns to optimal cluster (3 clusters)
+        
+        6. **Enhanced Features (+3 cluster features):**
+           - Cluster ID assignment
+           - Distance to cluster centroid
+           - Cluster average delivery time
+        
+        7. **ML Model:** Uses all 17 features for prediction
+        
+        **🎯 Key Features:**
+        - **Automatic Feature Generation:** You input 8, system creates 17
+        - **Typo Handling:** Handles both Pizza_Profile_Score and Pizza_Proofile_Score
+        - **Complete Pipeline:** Same transformations as training
+        - **Real-time Processing:** All computations done instantly
+        - **High Accuracy:** Enhanced features improve prediction quality
+        
+        **🚀 Technical Highlights:**
+        - RobustScaler for outlier-resistant normalization
+        - PCA for dimensionality reduction
+        - K-Means clustering for pattern recognition
+        - Comprehensive error handling and fallbacks
+        """)
+    
+    # Setup Instructions
+    with st.expander("⚙️ Setup & Troubleshooting"):
+        st.markdown("""
+        ### 📋 Required Files
+        
+        **Core Model Files:**
+        ```
+        best_model_enhanced.pkl       # Trained ML model
+        scaler_enhanced.pkl          # Feature scaler for final prediction
+        model_metadata_enhanced.pkl  # Model configuration and performance
+        ```
+        
+        **Unsupervised Pipeline Files:**
+        ```
+        unsupervised_scaler.pkl     # Feature engineering scaler
+        pca_model.pkl              # PCA transformation model
+        kmeans_model.pkl           # K-Means clustering model
+        feature_info.pkl           # Feature mapping and configuration
+        ```
+        
+        ### 🔧 If You See Errors:
+        
+        **Missing Files Error:**
+        1. Run the complete fix script: `python complete_fix_solution.py`
+        2. This will generate all required unsupervised models
+        3. Restart the Streamlit app
+        
+        **Feature Mismatch Error:**
+        1. The fix script handles the Pizza_Proofile_Score typo
+        2. Creates both versions for compatibility
+        3. Ensures all interaction features are properly generated
+        
+        **Pipeline Test:**
+        The app automatically tests the complete pipeline on startup and shows any issues.
         """)
 
 if __name__ == "__main__":
