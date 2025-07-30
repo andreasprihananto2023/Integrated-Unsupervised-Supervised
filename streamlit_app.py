@@ -409,8 +409,8 @@ def main():
                 traffic_impact = st.slider(
                     "🚦 Traffic Impact",
                     min_value=1,
-                    max_value=10,
-                    value=5,
+                    max_value=3,
+                    value=3,
                     help="1=No traffic, 10=Heavy traffic"
                 )
                 
