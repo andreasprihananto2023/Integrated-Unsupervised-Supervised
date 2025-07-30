@@ -370,10 +370,10 @@ def main():
                 
                 distance = st.slider(
                     "📍 Distance (km)",
-                    min_value=0.1,
-                    max_value=1.5,
-                    value=5.0,
-                    step=0.1
+                    min_value=0.5,
+                    max_value=10,
+                    value=10.0,
+                    step=0.5
                 )
 
                 topping_density = st.selectbox(
