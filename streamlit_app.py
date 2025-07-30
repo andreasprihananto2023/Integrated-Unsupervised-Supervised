@@ -187,7 +187,7 @@ def create_prediction_gauge_matplotlib(prediction):
     if prediction <= 20:
         color = "green"
         category = "Fast"
-    elif prediction <= 30:
+    elif prediction <= 20:
         color = "orange" 
         category = "Normal"
     else:
