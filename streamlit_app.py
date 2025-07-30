@@ -183,11 +183,12 @@ def load_and_check_models():
 # UTILITY FUNCTIONS
 # =========================================================================
 def create_prediction_gauge_matplotlib(prediction):
-    """Create gauge chart using matplotlib"""
+    """Create gauge chart using matplotlib - FIXED COLOR MAPPING"""
+    # Definisi kategori dan warna yang benar
     if prediction <= 20:
         color = "green"
         category = "Fast"
-    elif prediction <= 20:
+    elif prediction <= 30:
         color = "orange" 
         category = "Normal"
     else:
@@ -196,26 +197,36 @@ def create_prediction_gauge_matplotlib(prediction):
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
-    # Create gauge sectors
+    # Create gauge sectors dengan mapping yang benar
     theta = np.linspace(0, np.pi, 100)
     
-    # Background sectors
+    # Background sectors - DIPERBAIKI: urutan hijau-kuning-merah dari kiri ke kanan
+    # Untuk delivery time: kiri (cepat/hijau), tengah (normal/orange), kanan (lambat/merah)
     ax.fill_between(theta, 0, 1, where=(theta <= np.pi * 0.4), alpha=0.3, color='green', label='Fast (≤20 min)')
-    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.4) & (theta <= np.pi * 0.6), alpha=0.3, color='orange', label='Normal (20-30 min)')
-    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.6), alpha=0.3, color='red', label='Slow (>30 min)')
+    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.4) & (theta <= np.pi * 0.7), alpha=0.3, color='orange', label='Normal (20-30 min)')
+    ax.fill_between(theta, 0, 1, where=(theta > np.pi * 0.7), alpha=0.3, color='red', label='Slow (>30 min)')
     
-    # Needle position
-    needle_angle = np.pi * (1 - min(prediction / 50, 1))
+    # Needle position - DIPERBAIKI: logika posisi needle
+    # Untuk delivery time: nilai kecil (cepat) = kiri, nilai besar (lambat) = kanan
+    # Normalisasi prediction ke range 0-1, lalu konversi ke sudut
+    normalized_prediction = min(prediction / 50, 1)  # Normalisasi ke 0-1 (max 50 menit)
+    needle_angle = np.pi * (1 - normalized_prediction)  # 1 - normalized agar kecil = kiri, besar = kanan
+    
     ax.plot([needle_angle, needle_angle], [0, 0.8], color='black', linewidth=3)
     
-    # Add text
+    # Add text dengan warna yang sesuai kategori
     ax.text(np.pi/2, 0.5, f'{prediction:.1f}\nminutes', ha='center', va='center', 
             fontsize=16, fontweight='bold', bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.7))
     
     ax.text(np.pi/2, 0.2, category, ha='center', va='center', fontsize=14, fontweight='bold', color=color)
     
+    # Tambahkan label di bawah gauge untuk memperjelas
+    ax.text(np.pi * 0.2, -0.1, 'FAST\n≤20 min', ha='center', va='center', fontsize=10, color='green', fontweight='bold')
+    ax.text(np.pi * 0.55, -0.1, 'NORMAL\n20-30 min', ha='center', va='center', fontsize=10, color='orange', fontweight='bold')
+    ax.text(np.pi * 0.85, -0.1, 'SLOW\n>30 min', ha='center', va='center', fontsize=10, color='red', fontweight='bold')
+    
     ax.set_xlim(0, np.pi)
-    ax.set_ylim(0, 1)
+    ax.set_ylim(-0.2, 1)  # Diperluas sedikit untuk label
     ax.set_aspect('equal')
     ax.axis('off')
     ax.set_title('Predicted Delivery Time', fontsize=16, fontweight='bold', pad=20)
