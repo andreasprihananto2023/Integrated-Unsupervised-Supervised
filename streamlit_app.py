@@ -371,7 +371,7 @@ def main():
                 distance = st.slider(
                     "📍 Distance (km)",
                     min_value=0.5,
-                    max_value=10,
+                    max_value=10.0,
                     value=10.0,
                     step=0.5
                 )
