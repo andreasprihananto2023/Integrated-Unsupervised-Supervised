@@ -237,53 +237,6 @@ def create_prediction_gauge_matplotlib(prediction):
     plt.tight_layout()
     return fig
 
-def create_pipeline_flow_chart():
-    """Create pipeline flow visualization"""
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    # Define pipeline steps
-    steps = [
-        "User Input\n(8 features)",
-        "Feature Engineering\n(+6 interactions)", 
-        "RobustScaler\n(normalize 14 features)",
-        "PCA Transform\n(reduce to 4 components)",
-        "K-Means Clustering\n(assign cluster)",
-        "Enhanced Features\n(+3 cluster features)",
-        "ML Model\n(17 total features)",
-        "Prediction\n(delivery time)"
-    ]
-    
-    colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightyellow', 
-             'lightpink', 'lightgray', 'orange', 'red']
-    
-    # Create flow chart
-    y_positions = [0.8, 0.6, 0.4, 0.2, 0.4, 0.6, 0.8, 1.0]
-    x_positions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-    
-    for i, (step, color, x, y) in enumerate(zip(steps, colors, x_positions, y_positions)):
-        # Draw box
-        box = plt.Rectangle((x-0.05, y-0.08), 0.1, 0.16, 
-                           facecolor=color, edgecolor='black', linewidth=1)
-        ax.add_patch(box)
-        
-        # Add text
-        ax.text(x, y, step, ha='center', va='center', fontsize=9, fontweight='bold')
-        
-        # Add arrow to next step
-        if i < len(steps) - 1:
-            next_x, next_y = x_positions[i+1], y_positions[i+1]
-            ax.annotate('', xy=(next_x-0.05, next_y), xytext=(x+0.05, y),
-                       arrowprops=dict(arrowstyle='->', lw=2, color='black'))
-    
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1.2)
-    ax.set_aspect('equal')
-    ax.axis('off')
-    ax.set_title('Enhanced ML Pipeline Flow', fontsize=16, fontweight='bold', pad=20)
-    
-    plt.tight_layout()
-    return fig
-
 # =========================================================================
 # MAIN APP
 # =========================================================================
@@ -324,11 +277,6 @@ def main():
     
     st.success("✅ **All models loaded successfully!**")
     st.info("🚀 **Enhanced Pipeline Active:** 8 inputs → 17 features → ML prediction")
-    
-    # Show pipeline flow
-    with st.expander("📊 View Pipeline Flow"):
-        pipeline_fig = create_pipeline_flow_chart()
-        st.pyplot(pipeline_fig)
     
     # Sidebar - Model Information
     with st.sidebar:
